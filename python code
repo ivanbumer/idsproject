@@ -1,0 +1,240 @@
+!pip install pandas numpy scikit-learn
+import pandas as pd
+
+
+
+from google.colab import files
+uploaded = files.upload()  # Choose your zip file (e.g., KDD-NSL.zip)
+
+
+import zipfile
+import os
+
+with zipfile.ZipFile("KDD-NSL.zip.zip", 'r') as zip_ref:
+    zip_ref.extractall("kdd_data")
+
+# See what files are inside
+os.listdir("kdd_data")
+
+
+# Example if files are named KDDTrain+.txt and KDDTest+.txt
+train_path = "kdd_data/KDDTrain+.txt"
+test_path = "kdd_data/KDDTest+.txt"
+
+train_df = pd.read_csv(train_path, header=None)
+test_df = pd.read_csv(test_path, header=None)
+
+
+train_df.head()
+print("Training Data Shape:", train_df.shape)
+print("Testing Data Shape:", test_df.shape)
+
+
+
+column_names = [
+    "duration","protocol_type","service","flag","src_bytes","dst_bytes","land","wrong_fragment",
+    "urgent","hot","num_failed_logins","logged_in","num_compromised","root_shell","su_attempted",
+    "num_root","num_file_creations","num_shells","num_access_files","num_outbound_cmds",
+    "is_host_login","is_guest_login","count","srv_count","serror_rate","srv_serror_rate",
+    "rerror_rate","srv_rerror_rate","same_srv_rate","diff_srv_rate","srv_diff_host_rate",
+    "dst_host_count","dst_host_srv_count","dst_host_same_srv_rate","dst_host_diff_srv_rate",
+    "dst_host_same_src_port_rate","dst_host_srv_diff_host_rate","dst_host_serror_rate",
+    "dst_host_srv_serror_rate","dst_host_rerror_rate","dst_host_srv_rerror_rate",
+    "label", "difficulty_level"
+]
+
+train_df.columns = column_names
+test_df.columns = column_names
+
+
+train_df.drop("difficulty_level", axis=1, inplace=True)
+test_df.drop("difficulty_level", axis=1, inplace=True)
+
+
+print(train_df.shape)  # should now show (125973, 42)
+print(test_df.shape)   # should now show (22544, 42)
+
+
+train_df['label'] = train_df['label'].apply(lambda x: 0 if x == 'normal' else 1)
+test_df['label'] = test_df['label'].apply(lambda x: 0 if x == 'normal' else 1)
+
+
+from sklearn.preprocessing import LabelEncoder
+
+encoder = LabelEncoder()
+
+for col in ['protocol_type', 'service', 'flag']:
+    train_df[col] = encoder.fit_transform(train_df[col])
+    test_df[col] = encoder.transform(test_df[col])
+
+
+
+X_train = train_df.drop('label', axis=1)
+y_train = train_df['label']
+
+X_test = test_df.drop('label', axis=1)
+y_test = test_df['label']
+
+
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+
+ #Random Forest
+from sklearn.ensemble import RandomForestClassifier
+
+rf_model = RandomForestClassifier(n_estimators=100)
+rf_model.fit(X_train, y_train)
+y_pred_rf = rf_model.predict(X_test)
+
+print("Random Forest Accuracy:", accuracy_score(y_test, y_pred_rf))
+
+from sklearn.metrics import classification_report
+
+
+
+print("Random Forest:\n", classification_report(y_test, y_pred_rf))
+
+
+
+
+!pip install firebase-admin
+
+
+from google.colab import files
+
+uploaded = files.upload()  # This will prompt you to upload your JSON key file
+
+
+
+import os
+
+# List all files in the current directory
+print("Uploaded files:", os.listdir())
+
+
+import firebase_admin
+from firebase_admin import credentials, db
+
+# Replace with the actual uploaded filename
+cred = credentials.Certificate("intrusionkey.json")
+
+# Initialize only if not already done
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred, {
+        "databaseURL": "https://intrusionpalv2025-default-rtdb.firebaseio.com/"
+    })
+
+print("✅ Firebase initialized successfully!")
+
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+from google.colab import files
+import pandas as pd
+
+# Show a GUI upload prompt
+uploaded = files.upload()  # This opens a file picker GUI to choose a file from your computer
+
+# Extract the file name automatically
+for filename in uploaded.keys():
+    print(f"Uploaded file: {filename}")
+    wireshark_df = pd.read_csv(filename)  # Load into DataFrame
+
+print("Wireshark Data Preview:")
+wireshark_df.head()
+
+
+# Use the columns from your trained model
+expected_columns = train_df.drop('label', axis=1).columns
+
+# Fill missing columns with 0
+for col in expected_columns:
+    if col not in wireshark_df.columns:
+        wireshark_df[col] = 0
+
+# Drop extra columns not used in model
+wireshark_df = wireshark_df[expected_columns]
+
+
+# Save encoders from training data
+proto_mapping = dict(zip(train_df['protocol_type'].unique(), train_df['protocol_type']))
+service_mapping = dict(zip(train_df['service'].unique(), train_df['service']))
+flag_mapping = dict(zip(train_df['flag'].unique(), train_df['flag']))
+
+# Encode with fallback (-1) for unseen categories
+for col in ['protocol_type', 'service', 'flag']:
+    if col in wireshark_df.columns:
+        mapping = dict(zip(train_df[col].unique(), encoder.fit(train_df[col]).transform(train_df[col].unique())))
+        wireshark_df[col] = wireshark_df[col].map(mapping).fillna(-1).astype(int)
+
+
+# Drop any extra columns (like 'label' or unknowns)
+if 'label' in wireshark_df.columns:
+    wireshark_df = wireshark_df.drop('label', axis=1)
+
+# Reorder or align columns to match the training set
+expected_columns = X_train.shape[1]
+if wireshark_df.shape[1] != expected_columns:
+    print(f"⚠️ Feature mismatch: Expected {expected_columns} features, got {wireshark_df.shape[1]}")
+else:
+    print("✅ Wireshark data aligned with model input features.")
+
+
+# Scale using the same scaler used on training data
+wireshark_scaled = scaler.transform(wireshark_df)
+
+
+# Predict using Random Forest
+pred_rf = rf_model.predict(wireshark_scaled)
+
+# Add prediction results to the DataFrame
+wireshark_df['Threat_Prediction'] = pred_rf  # 1 = threat, 0 = normal
+
+# Optional: Convert 0/1 to human-readable labels
+wireshark_df['Threat_Status'] = wireshark_df['Threat_Prediction'].apply(lambda x: "Threat" if x == 1 else "Normal")
+
+print("✅ Random Forest predictions added to Wireshark DataFrame.")
+wireshark_df.head()
+
+
+# Ensure columns in wireshark_df are aligned with training data (same as train_df without 'label')
+expected_columns = train_df.drop('label', axis=1).columns
+
+# Fill missing columns with 0
+for col in expected_columns:
+    if col not in wireshark_df.columns:
+        wireshark_df[col] = 0
+
+# Drop any extra columns not used in model
+wireshark_df = wireshark_df[expected_columns]
+
+
+# Predict using the trained model (Random Forest in this case)
+pred_rf = rf_model.predict(wireshark_scaled)
+
+# Add the predictions to the DataFrame
+wireshark_df['Threat_Prediction'] = pred_rf  # 1 for threat, 0 for normal
+
+# Optionally: Convert 0/1 to human-readable labels for easier interpretation
+wireshark_df['Threat_Status'] = wireshark_df['Threat_Prediction'].apply(lambda x: "Threat" if x == 1 else "Normal")
+
+print("✅ Predictions added to DataFrame.")
+
+
+# Check if 'Threat_Prediction' column exists in the DataFrame
+if 'Threat_Prediction' not in wireshark_df.columns:
+    print("⚠️ 'Threat_Prediction' column is missing!")
+else:
+    print("✅ 'Threat_Prediction' column is present.")
+
+
+#Read entire intrusion detection results
+ref=db.reference("/")
+data=ref.get()
+print(data)
